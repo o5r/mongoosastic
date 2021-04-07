@@ -9,41 +9,40 @@ const config = require('./config')
 const Schema = mongoose.Schema
 const mongoosastic = require('../lib/mongoosastic')
 
-let User, PostComment, Post
+let PostComment = null
 
 const UserSchema = new Schema({
-  name: {type: String}
+  name: { type: String }
 })
 
 const PostCommentSchema = new Schema({
-  author: {type: Schema.Types.ObjectId, ref: 'User'},
-  text: {type: String}
+  author: { type: Schema.Types.ObjectId, ref: 'User' },
+  text: { type: String }
 })
 
 const PostSchema = new Schema({
-  body: {type: String, es_indexed: true},
-  author: {type: Schema.Types.ObjectId, ref: 'User', es_schema: UserSchema, es_indexed: true},
-  comments: [{type: Schema.Types.ObjectId, ref: 'PostComment', es_schema: PostComment, es_indexed: true}]
+  body: { type: String, es_indexed: true },
+  author: { type: Schema.Types.ObjectId, ref: 'User', es_schema: UserSchema, es_indexed: true },
+  comments: [{ type: Schema.Types.ObjectId, ref: 'PostComment', es_schema: PostComment, es_indexed: true }]
 })
 
 PostSchema.plugin(mongoosastic, {
   populate: [
-    {path: 'author'},
-    {path: 'comments', select: 'text'}
+    { path: 'author' },
+    { path: 'comments', select: 'text' }
   ]
 })
-
-User = mongoose.model('User', UserSchema)
-Post = mongoose.model('Post', PostSchema)
+const User = mongoose.model('User', UserSchema)
+const Post = mongoose.model('Post', PostSchema)
 PostComment = mongoose.model('PostComment', PostCommentSchema)
 
 describe('references', function () {
   before(function (done) {
-    mongoose.connect(config.mongoUrl, function () {
+    mongoose.connect(config.mongoUrl, config.mongoOpts, function () {
       async.forEach([Post, User, PostComment], function (model, cb) {
-        model.remove(cb)
+        model.deleteMany(cb)
       }, function () {
-        config.deleteIndexIfExists(['posts', 'users'], done)
+        config.deleteIndexIfExists(['posts', 'users', 'postcomments'], done)
       })
     })
   })
@@ -52,7 +51,7 @@ describe('references', function () {
     mongoose.disconnect()
     Post.esClient.close()
     esClient.close()
-    config.deleteIndexIfExists(['posts', 'users'], done)
+    config.deleteIndexIfExists(['posts', 'users', 'postcomments'], done)
   })
 
   describe('indexing', function () {
@@ -71,11 +70,12 @@ describe('references', function () {
 
     it('should index selected fields from referenced schema', function (done) {
       Post.findOne({}, function (err, post) {
+        if (err) return done(err)
         esClient.get({
           index: 'posts',
-          type: 'post',
           id: post._id.toString()
         }, function (_err, res) {
+          if (_err) return done(_err)
           res._source.author.name.should.eql('jake')
           done()
         })
@@ -88,6 +88,7 @@ describe('references', function () {
           query: 'jake'
         }
       }, function (err, results) {
+        if (err) return done(err)
         results.hits.total.should.eql(1)
         results.hits.hits[0]._source.body.should.eql('A very short post')
         done()
@@ -102,8 +103,8 @@ describe('references', function () {
         }, function (err, models) {
           if (err) return done(err)
           const comments = [
-            new PostComment({author: models.user._id, text: 'good post'}),
-            new PostComment({author: models.user._id, text: 'really'})
+            new PostComment({ author: models.user._id, text: 'good post' }),
+            new PostComment({ author: models.user._id, text: 'really' })
           ]
           async.forEach(comments, function (comment, cb) {
             comment.save(cb)
@@ -118,11 +119,12 @@ describe('references', function () {
 
       it('should correctly index arrays', function (done) {
         Post.findOne({}, function (err, post) {
+          if (err) return done(err)
           esClient.get({
             index: 'posts',
-            type: 'post',
             id: post._id.toString()
           }, function (_err, res) {
+            if (_err) return done(_err)
             res._source.comments[0].text.should.eql('good post')
             res._source.comments[1].text.should.eql('really')
             done()
@@ -132,11 +134,12 @@ describe('references', function () {
 
       it('should respect populate options', function (done) {
         Post.findOne({}, function (err, post) {
+          if (err) return done(err)
           esClient.get({
             index: 'posts',
-            type: 'post',
             id: post._id.toString()
           }, function (_err, res) {
+            if (_err) return done(_err)
             res._source.comments[0].text.should.eql('good post')
             should.not.exist(res._source.comments[0].author)
             done()

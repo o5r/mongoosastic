@@ -54,7 +54,7 @@ const PersonSchema = new Schema({
 })
 
 const DogSchema = new Schema({
-  name: {type: String, es_indexed: true}
+  name: { type: String, es_indexed: true }
 })
 
 TalkSchema.plugin(mongoosastic)
@@ -87,20 +87,26 @@ const Dog = mongoose.model('dog', DogSchema)
 // -- alright let's test this shiznit!
 describe('indexing', function () {
   before(function (done) {
-    mongoose.connect(config.mongoUrl, function () {
-      Tweet.remove(function () {
-        config.deleteIndexIfExists(['tweets', 'talks', 'people', 'public_tweets'], done)
+    mongoose.connect(config.mongoUrl, config.mongoOpts, function () {
+      config.deleteDocs([Tweet, Person, Talk, Bum, Dog], function () {
+        config.deleteIndexIfExists(['tweets', 'talks', 'people', 'ms_sample', 'dogs'], function () {
+          setTimeout(done, config.INDEXING_TIMEOUT)
+        })
       })
     })
   })
 
   after(function (done) {
-    mongoose.disconnect()
-    Talk.esClient.close()
-    Person.esClient.close()
-    Bum.esClient.close()
-    esClient.close()
-    config.deleteIndexIfExists(['tweets', 'talks', 'people'], done)
+    config.deleteDocs([Tweet, Person, Talk, Bum, Dog], function () {
+      config.deleteIndexIfExists(['tweets', 'talks', 'people', 'ms_sample', 'dogs'], function () {
+        mongoose.disconnect()
+        Talk.esClient.close()
+        Person.esClient.close()
+        Bum.esClient.close()
+        esClient.close()
+        done()
+      })
+    })
   })
 
   describe('Creating Index', function () {
@@ -157,7 +163,6 @@ describe('indexing', function () {
       }, function (err, doc) {
         esClient.get({
           index: 'tweets',
-          type: 'tweet',
           id: doc._id.toString()
         }, function (_err, res) {
           res._source.message.should.eql(doc.message)
@@ -227,7 +232,7 @@ describe('indexing', function () {
     })
 
     it('should be able to index with insertMany', function * () {
-      let tweets = [{
+      const tweets = [{
         message: 'insertMany 1'
       }, {
         message: 'insertMany 2'
@@ -235,14 +240,14 @@ describe('indexing', function () {
       yield Tweet.insertMany(tweets)
       yield (done) => setTimeout(done, config.INDEXING_TIMEOUT)
 
-      let results = yield (done) => Tweet.search({
+      const results = yield (done) => Tweet.search({
         query_string: {
           query: 'insertMany'
         }
       }, done)
       results.hits.total.should.eql(2)
-      let expected = tweets.map((doc) => doc.message)
-      let searched = results.hits.hits.map((doc) => doc._source.message)
+      const expected = tweets.map((doc) => doc.message)
+      const searched = results.hits.hits.map((doc) => doc._source.message)
       should(expected.sort()).be.eql(searched.sort())
     })
 
@@ -250,7 +255,7 @@ describe('indexing', function () {
       Tweet.search({
         queriez: 'jamescarr'
       }, function (err, results) {
-        err.message.should.match(/(SearchPhaseExecutionException|query_parsing_exception)/)
+        err.message.should.match(/(SearchPhaseExecutionException|parsing_exception)/)
         should.not.exist(results)
         done()
       })
@@ -535,11 +540,9 @@ describe('indexing', function () {
           index: 'ms_sample',
           body: {
             mappings: {
-              bum: {
-                properties: {
-                  name: {
-                    type: 'string'
-                  }
+              properties: {
+                name: {
+                  type: 'text'
                 }
               }
             }
@@ -566,7 +569,7 @@ describe('indexing', function () {
 
   describe('Disable automatic indexing', function () {
     it('should save but not index', function (done) {
-      const newDog = new Dog({name: 'Sparky'})
+      const newDog = new Dog({ name: 'Sparky' })
       newDog.save(function () {
         let whoopsIndexed = false
 
